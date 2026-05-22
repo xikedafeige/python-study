@@ -73,9 +73,6 @@
         chatBox.innerHTML += `<div class="user-msg">你：${userMsg}</div>`
         chatBox.scrollTop = chatBox.scrollHeight
 
-        // 添加到对话历史
-        chatHistory.push({ role: 'user', content: userMsg })
-
         // 创建AI回复容器
         const aiMsgId = `ai-${Date.now()}`
         chatBox.innerHTML += `<div class="ai-msg" id="${aiMsgId}">AI：</div>`
@@ -107,6 +104,7 @@
           }
 
           // 添加AI回复到对话历史
+          chatHistory.push({ role: 'user', content: userMsg })
           chatHistory.push({ role: 'assistant', content: aiReply })
         } catch (error) {
           aiMsgDom.innerHTML = `AI：❌ 出错了：${error.message}`

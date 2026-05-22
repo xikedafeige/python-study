@@ -1,14 +1,12 @@
 # 修正后的代码
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import asyncio
 import requests
 import json
 import os
 from dotenv import load_dotenv
-import time
 
 # 加载环境变量
 load_dotenv()
@@ -31,8 +29,11 @@ class ChatRequest(BaseModel):
     history: list = []  # 支持多轮对话（可选）
 
 # 4. ✅ 修正后的流式生成器
-async def real_ai_stream_generator(user_msg: str, history: list):
+def real_ai_stream_generator(user_msg: str, history: list):
     """对接通义千问大模型，获取流式智能回复"""
+    if not API_KEY:
+        yield "❌ AI回复出错：缺少 QIANWEN_API_KEY，请先在 .env 中配置。"
+        return
     
     # 构建对话历史
     messages = [
@@ -57,13 +58,19 @@ async def real_ai_stream_generator(user_msg: str, history: list):
     
     try:
         # 发起流式请求
-        with requests.post(url, headers=headers, json=payload, stream=True) as response:
-            response.raise_for_status()
-            
-            for line in response.iter_lines():
+        with requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            stream=True,
+            timeout=(10, 60),
+        ) as response:
+            if response.status_code != 200:
+                yield f"❌ AI回复出错：上游接口返回 {response.status_code}，{response.text}"
+                return
+
+            for line in response.iter_lines(decode_unicode=True):
                 if line:
-                    line = line.decode('utf-8')
-                    
                     # 处理SSE格式
                     if line.startswith("data: "):
                         data = line[6:]  # 去掉"data: "前缀
@@ -80,6 +87,10 @@ async def real_ai_stream_generator(user_msg: str, history: list):
                         except json.JSONDecodeError:
                             continue
                             
+    except requests.Timeout:
+        yield "❌ AI回复出错：上游接口响应超时，请稍后重试。"
+    except requests.RequestException as e:
+        yield f"❌ AI回复出错：上游接口请求失败：{str(e)}"
     except Exception as e:
         yield f"❌ AI回复出错：{str(e)}"
 
@@ -89,7 +100,8 @@ async def real_ai_chat(req: ChatRequest):
     """真正的AI流式聊天接口"""
     return StreamingResponse(
         real_ai_stream_generator(req.message, req.history),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
     )
 
 # 测试接口
