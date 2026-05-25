@@ -1,21 +1,10 @@
-# 修正后的代码
+# main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-import requests
-import json
-import os
-from dotenv import load_dotenv
+from routers import chat
 
-# 加载环境变量
-load_dotenv()
-API_KEY = os.getenv("QIANWEN_API_KEY")  # 注意：阿里云DashScope只需要API_KEY
+app = FastAPI()
 
-# 1. 创建应用
-app = FastAPI(title="真实AI流式聊天接口")
-
-# 2. 跨域设置（必须）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,88 +12,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. 前端请求格式
-class ChatRequest(BaseModel):
-    message: str
-    history: list = []  # 支持多轮对话（可选）
+# 挂载路由
+app.include_router(chat.router)
 
-# 4. ✅ 修正后的流式生成器
-def real_ai_stream_generator(user_msg: str, history: list):
-    """对接通义千问大模型，获取流式智能回复"""
-    if not API_KEY:
-        yield "❌ AI回复出错：缺少 QIANWEN_API_KEY，请先在 .env 中配置。"
-        return
-    
-    # 构建对话历史
-    messages = [
-        {"role": "system", "content": "你是一个友好的AI助手，前端转AI工程师的专家"}
-    ]
-    messages.extend(history)
-    messages.append({"role": "user", "content": user_msg})
-    
-    # 阿里云DashScope API请求
-    url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {API_KEY}"
-    }
-    
-    payload = {
-        "model": "qwen-turbo",  # 或 qwen-max
-        "messages": messages,
-        "stream": True,
-        "temperature": 0.7
-    }
-    
-    try:
-        # 发起流式请求
-        with requests.post(
-            url,
-            headers=headers,
-            json=payload,
-            stream=True,
-            timeout=(10, 60),
-        ) as response:
-            if response.status_code != 200:
-                yield f"❌ AI回复出错：上游接口返回 {response.status_code}，{response.text}"
-                return
-
-            for line in response.iter_lines(decode_unicode=True):
-                if line:
-                    # 处理SSE格式
-                    if line.startswith("data: "):
-                        data = line[6:]  # 去掉"data: "前缀
-                        
-                        if data == "[DONE]":
-                            break
-                            
-                        try:
-                            json_data = json.loads(data)
-                            if "choices" in json_data and len(json_data["choices"]) > 0:
-                                delta = json_data["choices"][0].get("delta", {})
-                                if "content" in delta:
-                                    yield delta["content"]
-                        except json.JSONDecodeError:
-                            continue
-                            
-    except requests.Timeout:
-        yield "❌ AI回复出错：上游接口响应超时，请稍后重试。"
-    except requests.RequestException as e:
-        yield f"❌ AI回复出错：上游接口请求失败：{str(e)}"
-    except Exception as e:
-        yield f"❌ AI回复出错：{str(e)}"
-
-# 5. 流式聊天接口（POST）
-@app.post("/api/ai/real_stream")
-async def real_ai_chat(req: ChatRequest):
-    """真正的AI流式聊天接口"""
-    return StreamingResponse(
-        real_ai_stream_generator(req.message, req.history),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache"},
-    )
-
-# 测试接口
 @app.get("/")
-def home():
-    return {"status": "ok", "message": "请用前端页面测试真实AI流式接口"}
+def index():
+    return {"msg":"模块化项目启动成功"}
